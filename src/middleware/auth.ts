@@ -20,32 +20,35 @@ export const checkAuth = async (req: Request, res: Response, next: NextFunction)
 
     const sessionToken = authHeader.split(' ')[1];
     
+    if (!sessionToken) {
+      res.status(401).json({ error: 'Unauthorized: Invalid token format' });
+      return;
+    }
+    
     try {
-      // Verify session token with Clerk
-      const session = await clerkClient.sessions.verifySession(sessionToken, sessionToken);
+      const payload = await clerkClient.verifyToken(sessionToken);
       
-      if (!session || !session.userId) {
+      if (!payload || !payload.sub) {
         res.status(401).json({ error: 'Unauthorized: Invalid session' });
         return;
       }
 
-      // Find or create user in our database
-      let user = await User.findOne({ clerkId: session.userId });
+      const userId = payload.sub;
+
+      let user = await User.findOne({ clerkId: userId });
       
       if (!user) {
-        // Get user info from Clerk
-        const clerkUser = await clerkClient.users.getUser(session.userId);
+        const clerkUser = await clerkClient.users.getUser(userId);
         
-        // Create user in our database with default role
         user = await User.create({
-          clerkId: session.userId,
+          clerkId: userId,
           email: clerkUser.emailAddresses[0]?.emailAddress || '',
-          role: 'user' // Default role
+          role: 'user'
         });
       }
 
       (req as AuthRequest).auth = {
-        userId: session.userId,
+        userId: userId,
         user: user
       };
       
@@ -71,7 +74,6 @@ export const checkRole = (requiredRole: 'assistant' | 'admin') => {
 
     const userRole = authReq.auth.user.role;
     
-    // Admin can access everything, otherwise check specific role
     if (userRole === 'admin' || userRole === requiredRole) {
       next();
     } else {

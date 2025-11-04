@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Event } from '../models';
-import { AuthRequest, checkAuth, checkRole } from '../middleware/auth';
+import { checkAuth, checkRole } from '../middleware/auth';
 import { z } from 'zod';
 
 const router = Router();
