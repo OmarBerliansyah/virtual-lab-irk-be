@@ -29,6 +29,17 @@ app.use('/api/tasks', taskRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/admin', adminRoutes);
 
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    message: 'Server is healthy',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
+});
+
 // Root route
 app.get('/', (req, res) => {
   res.json({ 
@@ -44,10 +55,6 @@ app.get('/', (req, res) => {
       admin: '/api/admin'
     }
   });
-});
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
 app.listen(PORT, () => {
