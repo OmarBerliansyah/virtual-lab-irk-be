@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import { eventRoutes, taskRoutes, webhookRoutes } from './routes';
+import { adminRoutes, eventRoutes, taskRoutes, webhookRoutes } from './routes';
 
 dotenv.config();
 
@@ -27,6 +27,7 @@ app.use(express.json());
 app.use('/api/events', eventRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/webhooks', webhookRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Root route
 app.get('/', (req, res) => {
@@ -39,7 +40,8 @@ app.get('/', (req, res) => {
       home: '/api/home',
       events: '/api/events',
       tasks: '/api/tasks',
-      webhooks: '/api/webhooks'
+      webhooks: '/api/webhooks',
+      admin: '/api/admin'
     }
   });
 });
