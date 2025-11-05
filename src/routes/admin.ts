@@ -15,7 +15,7 @@ router.get('/users', checkAuth, checkRole('admin'), async (req: Request, res: Re
     }
 });
 
-router.put('/users/:id/role', checkAuth, checkRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.put('/update/:id/role', checkAuth, checkRole('admin'), async (req: Request, res: Response): Promise<void> => {
     try {
         const roleSchema = z.object({
             role: z.enum(['user', 'assistant', 'admin']),
@@ -34,7 +34,7 @@ router.put('/users/:id/role', checkAuth, checkRole('admin'), async (req: Request
     }
 });
 
-router.post('/users/:id/role', checkAuth, checkRole('admin'), async (req: Request, res: Response): Promise<void> => {
+router.post('/create/:id/role', checkAuth, checkRole('admin'), async (req: Request, res: Response): Promise<void> => {
     try {
         const roleSchema = z.object({
             role: z.enum(['user', 'assistant', 'admin']),
