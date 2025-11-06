@@ -42,8 +42,29 @@ export const checkAuth = async (req: Request, res: Response, next: NextFunction)
         const email = clerkUser.emailAddresses[0]?.emailAddress || '';
         
         let role = 'user';
+        
+        // Admin whitelisting
         if (email === '18223055@std.stei.itb.ac.id' || email === '18223005@std.stei.itb.ac.id') {
           role = 'admin';
+        } 
+        // Assistant whitelisting - check NIM pattern
+        else if (email.endsWith('@std.stei.itb.ac.id')) {
+          const nimMatch = email.match(/^(\d{8})@std\.stei\.itb\.ac\.id$/);
+          if (nimMatch && nimMatch[1]) {
+            const nim = nimMatch[1];
+            // Assistant NIMs from the provided lists
+            const assistantNIMs = [
+              "13522001", "13522002", "13522005", "13522037", "13522052", "13522091", "13522098", 
+              "13522110", "13522124", "13522137", "13522147", "13522153",
+
+              "13523017", "13523063", "13523069", "13523084", "13523091", "13523094", "13523100",
+              "13523115", "13523136", "13523154", "13523158", "13523160"
+            ];
+            
+            if (assistantNIMs.includes(nim)) {
+              role = 'assistant';
+            }
+          }
         }
         
         user = await User.create({
