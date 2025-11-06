@@ -39,11 +39,17 @@ export const checkAuth = async (req: Request, res: Response, next: NextFunction)
       
       if (!user) {
         const clerkUser = await clerkClient.users.getUser(userId);
+        const email = clerkUser.emailAddresses[0]?.emailAddress || '';
+        
+        let role = 'user';
+        if (email === '18223055@std.stei.itb.ac.id' || email === '18223005@std.stei.itb.ac.id') {
+          role = 'admin';
+        }
         
         user = await User.create({
           clerkId: userId,
-          email: clerkUser.emailAddresses[0]?.emailAddress || '',
-          role: 'user'
+          email,
+          role
         });
       }
 

@@ -2,14 +2,18 @@ import express from 'express';
 import cors from 'cors';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import { adminRoutes, eventRoutes, taskRoutes, webhookRoutes } from './routes';
+import { adminRoutes, eventRoutes, taskRoutes, webhookRoutes, userRoutes } from './routes';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT;
 
-mongoose.connect(process.env.MONGO_URI!)
+const options = {
+  serverSelectionTimeoutMS: 100000
+}
+
+mongoose.connect(process.env.MONGO_URI!, options)
   .then(() => console.log('MongoDB connected successfully'))
   .catch((err: Error) => console.error('MongoDB connection error:', err));
 
@@ -18,7 +22,7 @@ app.use(cors({
     'http://localhost:8080',
     'http://127.0.0.1:8080', 
     'http://192.168.1.1:8080',
-    process.env.CORS_ORIGIN || 'http://localhost:8080'
+    `${process.env.CORS_ORIGIN}`
   ],
   credentials: true
 }));
@@ -28,6 +32,7 @@ app.use('/api/events', eventRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/users', userRoutes);
 
 app.get('/health', (req, res) => {
   res.status(200).json({

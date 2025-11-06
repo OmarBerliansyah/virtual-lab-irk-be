@@ -5,7 +5,13 @@ interface IEvent extends Document {
   start: Date;
   end?: Date;
   course: string;
-  type: 'deadline' | 'release' | 'assessment';
+  type: 'deadline' | 'release' | 'assessment' | 'highlight';
+  description?: string;
+  photoUrl?: string;
+  linkAttachments?: Array<{
+    title: string;
+    url: string;
+  }>;
 }
 
 const eventSchema = new Schema<IEvent>({
@@ -15,9 +21,15 @@ const eventSchema = new Schema<IEvent>({
   course: { type: String, required: true, index: true },
   type: {
     type: String,
-    enum: ['deadline', 'release', 'assessment'],
+    enum: ['deadline', 'release', 'assessment', 'highlight'],
     required: true,
   },
+  description: { type: String },
+  photoUrl: { type: String },
+  linkAttachments: [{
+    title: { type: String, required: true },
+    url: { type: String, required: true }
+  }],
 }, { timestamps: true });
 
 export const Event = model<IEvent>('Event', eventSchema);

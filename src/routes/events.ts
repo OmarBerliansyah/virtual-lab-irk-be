@@ -7,10 +7,20 @@ const router = Router();
 
 const eventSchema = z.object({
   title: z.string().min(1),
-  start: z.string().datetime(),
-  end: z.string().datetime().optional(),
+  start: z.string().refine((val) => !isNaN(Date.parse(val)), {
+    message: "Invalid date format"
+  }),
+  end: z.string().refine((val) => !isNaN(Date.parse(val)), {
+    message: "Invalid date format"
+  }).optional(),
   course: z.string().min(1),
-  type: z.enum(['deadline', 'release', 'assessment'])
+  type: z.enum(['deadline', 'release', 'assessment', 'highlight']),
+  description: z.string().optional(),
+  photoUrl: z.string().optional(),
+  linkAttachments: z.array(z.object({
+    title: z.string(),
+    url: z.string().url()
+  })).optional()
 });
 
 router.get('/', async (req: Request, res: Response): Promise<void> => {
