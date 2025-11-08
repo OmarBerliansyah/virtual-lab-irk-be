@@ -22,6 +22,7 @@ app.use(cors({
     'http://localhost:8080',
     'http://127.0.0.1:8080', 
     'http://192.168.1.1:8080',
+    'https://virtual-lab-pewfk6707-omarberliansyahs-projects.vercel.app/',
     `${process.env.CORS_ORIGIN}`
   ],
   credentials: true
