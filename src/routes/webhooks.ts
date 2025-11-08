@@ -4,14 +4,6 @@ import { Webhook } from 'svix';
 
 const router = Router();
 
-// router.get('/test', (req: Request, res: Response) => {
-//   res.status(200).json({ 
-//     message: 'Webhook endpoint is reachable!', 
-//     timestamp: new Date().toISOString(),
-//     url: req.originalUrl 
-//   });
-// });
-
 router.post('/clerk', async (req: Request, res: Response): Promise<void> => {
   try {
     const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
