@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT;
 
 const options = {
-  serverSelectionTimeoutMS: 100000
+  serverSelectionTimeoutMS: 60000
 }
 
 mongoose.connect(process.env.MONGO_URI!, options)
