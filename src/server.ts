@@ -65,6 +65,9 @@ app.get('/', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-});
+// For localhost only:
+// app.listen(PORT, () => {
+//   console.log(`Backend server running on http://localhost:${PORT}`);
+// });
+
+export default app;

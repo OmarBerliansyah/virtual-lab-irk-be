@@ -53,11 +53,7 @@ router.put('/:id', checkAuth, checkRole('assistant'), async (req: Request, res: 
     const { id } = req.params;
     const validatedData = taskSchema.partial().parse(req.body);
     
-    let task = await Task.findByIdAndUpdate(id, validatedData, { new: true }).catch(() => null);
-    
-    if (!task) {
-      task = await Task.findOneAndUpdate({ id: id }, validatedData, { new: true });
-    }
+    const task = await Task.findByIdAndUpdate(id, validatedData, { new: true });
     
     if (!task) {
       res.status(404).json({ error: 'Task not found' });
@@ -82,11 +78,8 @@ router.delete('/:id', checkAuth, checkRole('assistant'), async (req: Request, re
   try {
     const { id } = req.params;
     
-    let task = await Task.findByIdAndDelete(id).catch(() => null);
-    
-    if (!task) {
-      task = await Task.findOneAndDelete({ id: id });
-    }
+    // Only try to find by ObjectId - no fallback to temporary IDs  
+    const task = await Task.findByIdAndDelete(id);
     
     if (!task) {
       res.status(404).json({ error: 'Task not found' });

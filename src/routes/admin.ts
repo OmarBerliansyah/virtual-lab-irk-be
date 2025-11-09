@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { User } from '../models';
-import { checkAuth, checkRole } from '../middleware/auth';
+import { checkAuth, checkRole, invalidateUserCache } from '../middleware/auth';
 import { z } from 'zod';
 
 const router = Router();
@@ -27,6 +27,8 @@ router.put('/update/:id/role', checkAuth, checkRole('admin'), async (req: Reques
             return;
         }
 
+        invalidateUserCache(user.clerkId);
+
         res.json(user);
     } 
     catch (error) {
@@ -45,6 +47,10 @@ router.post('/create/:id/role', checkAuth, checkRole('admin'), async (req: Reque
             res.status(404).json({ error: 'User not found' });
             return;
         }
+
+        // Invalidate cache for this user when their role changes
+        invalidateUserCache(user.clerkId);
+
         res.json(user);
     } 
     catch (error) {
@@ -80,6 +86,11 @@ router.put('/users/:id', checkAuth, checkRole('admin'), async (req: Request, res
             return;
         }
 
+        // Invalidate cache for this user if their role changed
+        if (validatedData.role) {
+            invalidateUserCache(user.clerkId);
+        }
+
         res.json(user);
     } 
     catch (error) {
@@ -94,6 +105,10 @@ router.delete('/users/:id', checkAuth, checkRole('admin'), async (req: Request, 
             res.status(404).json({ error: 'User not found' });
             return;
         }
+
+        // Invalidate cache for deleted user
+        invalidateUserCache(user.clerkId);
+
         res.status(204).send();
     } 
     catch (error) {

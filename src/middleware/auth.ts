@@ -164,4 +164,9 @@ export const checkRole = (requiredRole: 'assistant' | 'admin') => {
   };
 };
 
+export const invalidateUserCache = (userId: string): void => {
+  userCache.delete(userId);
+  console.log(`User cache invalidated for userId: ${userId}`);
+};
+
 export type { AuthRequest };
