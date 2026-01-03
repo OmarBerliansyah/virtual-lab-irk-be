@@ -6,3 +6,7 @@ nodemon.json
 # Docker specific
 Dockerfile
 .dockerignore
+
+prisma/seed-data
+prisma/parse-bson.ts
+prisma/seed.ts

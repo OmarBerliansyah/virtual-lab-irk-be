@@ -1,23 +1,21 @@
-import { Router, Request, Response } from 'express';
-import { checkAuth, AuthRequest } from '../middleware/auth';
-import { User } from '../models';
+import { Hono } from 'hono';
+import prisma from '../lib/prisma';
+import { checkAuth, type AuthVariables } from '../middleware/auth';
 
-const router = Router();
+const app = new Hono<{ Variables: AuthVariables }>();
 
-router.get('/profile', checkAuth, async (req: Request, res: Response): Promise<void> => {
+app.get('/profile', checkAuth, async (c) => {
   try {
-    const authReq = req as AuthRequest;
-    const user = authReq.auth?.user;
+    const user = c.get('auth')?.user;
 
     if (!user) {
-      res.status(404).json({ error: 'User not found' });
-      return;
+      return c.json({ error: 'User not found' }, 404);
     }
 
-    res.status(200).json({
+    return c.json({
       success: true,
       user: {
-        id: user._id,
+        _id: user.id,
         clerkId: user.clerkId,
         email: user.email,
         role: user.role,
@@ -27,37 +25,33 @@ router.get('/profile', checkAuth, async (req: Request, res: Response): Promise<v
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return c.json({ error: 'Internal server error' }, 500);
   }
 });
 
-router.put('/profile', checkAuth, async (req: Request, res: Response): Promise<void> => {
+app.put('/profile', checkAuth, async (c) => {
   try {
-    const authReq = req as AuthRequest;
-    const userId = authReq.auth?.user?._id;
+    const userId = c.get('auth')?.user?.id;
 
     if (!userId) {
-      res.status(404).json({ error: 'User not found' });
-      return;
+      return c.json({ error: 'User not found' }, 404);
     }
 
-    const { email } = req.body;
-    
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { email },
-      { new: true, runValidators: true }
-    );
+    const { email } = await c.req.json();
+
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: { email }
+    });
 
     if (!updatedUser) {
-      res.status(404).json({ error: 'User not found' });
-      return;
+      return c.json({ error: 'User not found' }, 404);
     }
 
-    res.status(200).json({
+    return c.json({
       success: true,
       user: {
-        id: updatedUser._id,
+        _id: updatedUser.id,
         clerkId: updatedUser.clerkId,
         email: updatedUser.email,
         role: updatedUser.role,
@@ -67,8 +61,8 @@ router.put('/profile', checkAuth, async (req: Request, res: Response): Promise<v
     });
   } catch (error) {
     console.error('Error updating user profile:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return c.json({ error: 'Internal server error' }, 500);
   }
 });
 
-export default router;
+export default app;

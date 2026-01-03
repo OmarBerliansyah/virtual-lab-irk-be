@@ -1,271 +1,229 @@
-import { Router } from 'express';
-import { checkAuth, checkRole, AuthRequest } from '../middleware/auth';
-import { Assistant, IAssistant } from '../models';
+import { Hono } from 'hono';
 import { z } from 'zod';
+import { checkAuth, checkRole, type AuthVariables } from '../middleware/auth';
+import prisma, { AssistantRole, Prisma } from '../lib/prisma';
 
-const router = Router();
+const app = new Hono<{ Variables: AuthVariables }>();
 
 const createAssistantSchema = z.object({
-  name: z.string().min(1, 'Name is required').trim(),
-  email: z.string().email('Invalid email format').regex(/^\d{8}@std\.stei\.itb\.ac\.id$/, 'Must be a valid ITB student email'),
-  nim: z.string().regex(/^\d{8}$/, 'NIM must be 8 digits'),
-  role: z.enum(['Assistant', 'Head Assistant', 'Research Assistant', 'Teaching Assistant', 'Lab Assistant']).optional(),
-  image: z.string().refine((val) => {
-    return val.startsWith('http') || val.startsWith('data:image/');
-  }, 'Image must be a valid URL or base64 data URL').optional(),
+  name: z.string().min(1).trim(),
+  email: z.string().email().regex(/^\d{8}@std\.stei\.itb\.ac\.id$/),
+  nim: z.string().regex(/^\d{8}$/),
+  role: z.enum(['ASSISTANT', 'Head Assistant', 'Research Assistant', 'Teaching Assistant', 'Lab Assistant']).optional(),
+  image: z
+    .string()
+    .refine((val) => val.startsWith('http') || val.startsWith('data:image/'))
+    .optional(),
   isActive: z.boolean().optional()
 });
 
 const updateAssistantSchema = z.object({
-  name: z.string().min(1, 'Name is required').trim().optional(),
-  role: z.enum(['Assistant', 'Head Assistant', 'Research Assistant', 'Teaching Assistant', 'Lab Assistant']).optional(),
-  image: z.string().refine((val) => {
-    return val.startsWith('http') || val.startsWith('data:image/');
-  }, 'Image must be a valid URL or base64 data URL').optional(),
+  name: z.string().min(1).trim().optional(),
+  role: z.enum(['ASSISTANT', 'Head Assistant', 'Research Assistant', 'Teaching Assistant', 'Lab Assistant']).optional(),
+  image: z
+    .string()
+    .refine((val) => val.startsWith('http') || val.startsWith('data:image/'))
+    .optional(),
   isActive: z.boolean().optional()
 });
 
-router.get('/', async (req, res) => {
+const mapAssistantRole = (role?: string | null): AssistantRole => {
+  const mapping: Record<string, AssistantRole> = {
+    'Assistant': 'ASSISTANT',
+    'Head Assistant': 'HEAD_ASSISTANT',
+    'Research Assistant': 'RESEARCH_ASSISTANT',
+    'Teaching Assistant': 'TEACHING_ASSISTANT',
+    'Lab Assistant': 'LAB_ASSISTANT'
+  };
+  return role ? mapping[role] ?? 'ASSISTANT' : 'ASSISTANT';
+};
+
+const transformAssistant = (assistant: any) => ({
+  _id: assistant.id,
+  name: assistant.name,
+  email: assistant.email,
+  nim: assistant.nim,
+  angkatan: assistant.angkatan,
+  role: assistant.role,
+  image: assistant.image,
+  isActive: assistant.isActive,
+  createdAt: assistant.createdAt,
+  updatedAt: assistant.updatedAt
+});
+
+app.get('/', async (c) => {
   try {
-    const { active } = req.query;
-    
-    const filter: any = {};
+    const active = c.req.query('active');
+    const filter: Prisma.AssistantWhereInput = {};
     if (active === 'true') {
       filter.isActive = true;
     }
-    
-    const assistants = await Assistant.find(filter)
-      .sort({ angkatan: 1, name: 1 })
-      .select('-__v');
 
-    res.json({
-      success: true,
-      data: assistants
+    const assistants = await prisma.assistant.findMany({
+      where: filter,
+      orderBy: [{ angkatan: 'asc' }, { name: 'asc' }]
     });
+
+    return c.json({ success: true, data: assistants.map(transformAssistant) });
   } catch (error) {
     console.error('Error fetching assistants:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch assistants'
-    });
+    return c.json({ success: false, error: 'Failed to fetch assistants' }, 500);
   }
 });
 
-router.get('/me', checkAuth, async (req, res) => {
+app.get('/me', checkAuth, async (c) => {
   try {
-    const authReq = req as AuthRequest;
-    const userEmail = authReq.auth?.user?.email;
-    
+    const userEmail = c.get('auth')?.user?.email;
     if (!userEmail) {
-      return res.status(400).json({
-        success: false,
-        error: 'User email not found'
-      });
+      return c.json({ success: false, error: 'User email not found' }, 400);
     }
 
-    const assistant = await Assistant.findOne({ email: userEmail }).select('-__v');
-    
+    const assistant = await prisma.assistant.findUnique({ where: { email: userEmail } });
     if (!assistant) {
-      return res.status(404).json({
-        success: false,
-        error: 'Assistant profile not found'
-      });
+      return c.json({ success: false, error: 'Assistant profile not found' }, 404);
     }
 
-    res.json({
-      success: true,
-      data: assistant
-    });
+    return c.json({ success: true, data: transformAssistant(assistant) });
   } catch (error) {
     console.error('Error fetching assistant profile:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch assistant profile'
-    });
+    return c.json({ success: false, error: 'Failed to fetch assistant profile' }, 500);
   }
 });
 
-router.get('/:id', async (req, res) => {
+app.get('/:id', async (c) => {
   try {
-    const assistant = await Assistant.findById(req.params.id).select('-__v');
-    
+    const id = c.req.param('id');
+    if (!id) return c.json({ success: false, error: 'Assistant ID is required' }, 400);
+
+    const assistant = await prisma.assistant.findUnique({ where: { id } });
     if (!assistant) {
-      return res.status(404).json({
-        success: false,
-        error: 'Assistant not found'
-      });
+      return c.json({ success: false, error: 'Assistant not found' }, 404);
     }
 
-    res.json({
-      success: true,
-      data: assistant
-    });
+    return c.json({ success: true, data: transformAssistant(assistant) });
   } catch (error) {
     console.error('Error fetching assistant:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch assistant'
-    });
+    return c.json({ success: false, error: 'Failed to fetch assistant' }, 500);
   }
 });
 
-// POST /assistants - Create new assistant (admin only)
-router.post('/', checkAuth, checkRole('admin'), async (req, res) => {
+app.post('/', checkAuth, checkRole('ADMIN'), async (c) => {
   try {
-    const validatedData = createAssistantSchema.parse(req.body);
-    
-    // Check if assistant with same email or NIM already exists
-    const existingAssistant = await Assistant.findOne({
-      $or: [
-        { email: validatedData.email },
-        { nim: validatedData.nim }
-      ]
+    const validatedData = createAssistantSchema.parse(await c.req.json());
+
+    const existingAssistant = await prisma.assistant.findFirst({
+      where: { OR: [{ email: validatedData.email }, { nim: validatedData.nim }] }
     });
-    
+
     if (existingAssistant) {
-      return res.status(400).json({
-        success: false,
-        error: 'Assistant with this email or NIM already exists'
-      });
+      return c.json({ success: false, error: 'Assistant with this email or NIM already exists' }, 400);
     }
 
-    const assistant = await Assistant.create(validatedData);
-    
-    res.status(201).json({
-      success: true,
-      data: assistant,
-      message: 'Assistant created successfully'
+    const angkatanFromNim = validatedData.nim.substring(3, 5);
+    const assistant = await prisma.assistant.create({
+      data: {
+        name: validatedData.name,
+        email: validatedData.email,
+        nim: validatedData.nim,
+        angkatan: `IF'${angkatanFromNim}`,
+        role: mapAssistantRole(validatedData.role),
+        image: validatedData.image ?? null,
+        isActive: validatedData.isActive ?? true
+      }
     });
+
+    return c.json({ success: true, data: transformAssistant(assistant), message: 'Assistant created successfully' }, 201);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        details: error.issues
-      });
+      return c.json({ success: false, error: 'Validation failed', details: error.issues }, 400);
     }
-    
     console.error('Error creating assistant:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to create assistant'
-    });
+    return c.json({ success: false, error: 'Failed to create assistant' }, 500);
   }
 });
 
-// PUT /assistants/:id - Update assistant (assistant can update their own, admin can update any)
-router.put('/:id', checkAuth, async (req, res) => {
+app.put('/:id', checkAuth, async (c) => {
   try {
-    const authReq = req as AuthRequest;
-    const assistant = await Assistant.findById(req.params.id);
-    
+    const id = c.req.param('id');
+    if (!id) return c.json({ success: false, error: 'Assistant ID is required' }, 400);
+
+    const assistant = await prisma.assistant.findUnique({ where: { id } });
     if (!assistant) {
-      return res.status(404).json({
-        success: false,
-        error: 'Assistant not found'
-      });
+      return c.json({ success: false, error: 'Assistant not found' }, 404);
     }
 
-    // Check permissions: assistant can only update their own profile, admin can update any
-    const isOwnProfile = assistant.email === authReq.auth?.user?.email;
-    const isAdmin = authReq.auth?.user?.role === 'admin';
-    
+    const auth = c.get('auth');
+    const isOwnProfile = assistant.email === auth?.user?.email;
+    const isAdmin = auth?.user?.role === 'ADMIN';
     if (!isOwnProfile && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        error: 'You can only update your own profile'
-      });
+      return c.json({ success: false, error: 'You can only update your own profile' }, 403);
     }
 
-    const validatedData = updateAssistantSchema.parse(req.body);
-    
-    // Only admins can change isActive status
+    const validatedData = updateAssistantSchema.parse(await c.req.json());
     if (validatedData.isActive !== undefined && !isAdmin) {
       delete validatedData.isActive;
     }
-    
-    const updatedAssistant = await Assistant.findByIdAndUpdate(
-      req.params.id,
-      { ...validatedData, updatedAt: new Date() },
-      { new: true, runValidators: true }
-    ).select('-__v');
-    
-    res.json({
-      success: true,
-      data: updatedAssistant,
-      message: 'Assistant updated successfully'
-    });
+
+    const updateData: { name?: string; role?: AssistantRole; image?: string | null; isActive?: boolean } = {};
+    if ('name' in validatedData && validatedData.name !== undefined) updateData.name = validatedData.name;
+    if ('role' in validatedData && validatedData.role !== undefined) updateData.role = mapAssistantRole(validatedData.role);
+    if ('image' in validatedData) updateData.image = validatedData.image ?? null;
+    if ('isActive' in validatedData && validatedData.isActive !== undefined) updateData.isActive = validatedData.isActive;
+
+    const updatedAssistant = await prisma.assistant.update({ where: { id }, data: updateData });
+
+    return c.json({ success: true, data: transformAssistant(updatedAssistant), message: 'Assistant updated successfully' });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return res.status(400).json({
-        success: false,
-        error: 'Validation failed',
-        details: error.issues
-      });
+      return c.json({ success: false, error: 'Validation failed', details: error.issues }, 400);
     }
-    
     console.error('Error updating assistant:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to update assistant'
-    });
+    return c.json({ success: false, error: 'Failed to update assistant' }, 500);
   }
 });
 
-// DELETE /assistants/:id - Delete assistant (admin only)
-router.delete('/:id', checkAuth, checkRole('admin'), async (req, res) => {
+app.delete('/:id', checkAuth, checkRole('ADMIN'), async (c) => {
   try {
-    const assistant = await Assistant.findById(req.params.id);
-    
+    const id = c.req.param('id');
+    if (!id) return c.json({ success: false, error: 'Assistant ID is required' }, 400);
+
+    const assistant = await prisma.assistant.findUnique({ where: { id } });
     if (!assistant) {
-      return res.status(404).json({
-        success: false,
-        error: 'Assistant not found'
-      });
+      return c.json({ success: false, error: 'Assistant not found' }, 404);
     }
 
-    await Assistant.findByIdAndDelete(req.params.id);
-    
-    res.json({
-      success: true,
-      message: 'Assistant deleted successfully'
-    });
+    await prisma.assistant.delete({ where: { id } });
+    return c.json({ success: true, message: 'Assistant deleted successfully' });
   } catch (error) {
     console.error('Error deleting assistant:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to delete assistant'
-    });
+    return c.json({ success: false, error: 'Failed to delete assistant' }, 500);
   }
 });
 
-// PATCH /assistants/:id/toggle-active - Toggle assistant active status (admin only)
-router.patch('/:id/toggle-active', checkAuth, checkRole('admin'), async (req, res) => {
+app.patch('/:id/toggle-active', checkAuth, checkRole('ADMIN'), async (c) => {
   try {
-    const assistant = await Assistant.findById(req.params.id);
-    
+    const id = c.req.param('id');
+    if (!id) return c.json({ success: false, error: 'Assistant ID is required' }, 400);
+
+    const assistant = await prisma.assistant.findUnique({ where: { id } });
     if (!assistant) {
-      return res.status(404).json({
-        success: false,
-        error: 'Assistant not found'
-      });
+      return c.json({ success: false, error: 'Assistant not found' }, 404);
     }
 
-    assistant.isActive = !assistant.isActive;
-    await assistant.save();
-    
-    res.json({
+    const updatedAssistant = await prisma.assistant.update({
+      where: { id },
+      data: { isActive: !assistant.isActive }
+    });
+
+    return c.json({
       success: true,
-      data: assistant,
-      message: `Assistant ${assistant.isActive ? 'activated' : 'deactivated'} successfully`
+      data: transformAssistant(updatedAssistant),
+      message: `Assistant ${updatedAssistant.isActive ? 'activated' : 'deactivated'} successfully`
     });
   } catch (error) {
     console.error('Error toggling assistant status:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to toggle assistant status'
-    });
+    return c.json({ success: false, error: 'Failed to toggle assistant status' }, 500);
   }
 });
 
-export { router as assistantRoutes };
+export { app as assistantRoutes };

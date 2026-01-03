@@ -1,9 +1,9 @@
-import { Router, Request, Response } from 'express';
-import { Event } from '../models';
-import { checkAuth, checkRole } from '../middleware/auth';
+import { Hono } from 'hono';
+import { checkAuth, checkRole, type AuthVariables } from '../middleware/auth';
+import prisma, { isPrismaError, EventType, Prisma } from '../lib/prisma';
 import { z } from 'zod';
 
-const router = Router();
+const app = new Hono<{ Variables: AuthVariables }>();
 
 const eventSchema = z.object({
   title: z.string().min(1),
@@ -23,67 +23,114 @@ const eventSchema = z.object({
   })).optional()
 });
 
-router.get('/', async (req: Request, res: Response): Promise<void> => {
+const mapEventType = (type: string): EventType => {
+  const mapping: Record<string, EventType> = {
+    deadline: 'DEADLINE',
+    release: 'RELEASE',
+    assessment: 'ASSESSMENT',
+    highlight: 'HIGHLIGHT'
+  };
+
+  return mapping[type] ?? 'HIGHLIGHT';
+};
+
+// Transform Prisma event to frontend format
+const transformEvent = (event: any) => ({
+  _id: event.id,
+  title: event.title,
+  start: event.start,
+  end: event.end,
+  course: event.course,
+  type: event.type.toLowerCase(),
+  description: event.description,
+  photoUrl: event.photoUrl,
+  linkAttachments: event.linkAttachments,
+  createdAt: event.createdAt,
+  updatedAt: event.updatedAt
+});
+
+app.get('/', async (c) => {
   try {
-    const { course } = req.query;
-    const filter = course ? { course } : {};
-    
-    const events = await Event.find(filter).sort({ start: 1 });
-    res.json(events);
+    const course = c.req.query('course');
+
+    const events = await prisma.event.findMany({
+      where: course ? { course: String(course) } : {},
+      orderBy: { start: 'asc' }
+    });
+    return c.json(events.map(transformEvent));
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch events' });
+    return c.json({ error: 'Failed to fetch events' }, 500);
   }
 });
 
-router.post('/', checkAuth, checkRole('assistant'), async (req: Request, res: Response): Promise<void> => {
+app.post('/', checkAuth, checkRole('ASSISTANT'), async (c) => {
   try {
-    const validatedData = eventSchema.parse(req.body);
-    const event = new Event(validatedData);
-    await event.save();
-    
-    res.status(201).json(event);
+    const body = await c.req.json();
+    const validatedData = eventSchema.parse(body);
+    const event = await prisma.event.create({
+      data: {
+        title: validatedData.title,
+        course: validatedData.course,
+        type: mapEventType(validatedData.type),
+        description: validatedData.description ?? null,
+        photoUrl: validatedData.photoUrl ?? null,
+        linkAttachments: validatedData.linkAttachments ?? Prisma.JsonNull,
+        start: new Date(validatedData.start),
+        end: validatedData.end ? new Date(validatedData.end) : null
+      }
+    });
+
+    return c.json(transformEvent(event), 201);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: 'Invalid event data', details: error.issues });
-      return;
+      return c.json({ error: 'Invalid event data', details: error.issues }, 400);
     }
-    res.status(500).json({ error: 'Failed to create event' });
+    return c.json({ error: 'Failed to create event' }, 500);
   }
 });
 
-router.put('/:id', checkAuth, checkRole('assistant'), async (req: Request, res: Response): Promise<void> => {
+app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
   try {
-    const validatedData = eventSchema.partial().parse(req.body);
-    const event = await Event.findByIdAndUpdate(req.params.id, validatedData, { new: true });
-    
-    if (!event) {
-      res.status(404).json({ error: 'Event not found' });
-      return;
-    }
-    
-    res.json(event);
+    const body = await c.req.json();
+    const validatedData = eventSchema.partial().parse(body);
+    const id = c.req.param('id');
+    const event = await prisma.event.update({
+      where: { id },
+      data: {
+        ...('title' in validatedData && validatedData.title !== undefined ? { title: validatedData.title } : {}),
+        ...('course' in validatedData && validatedData.course !== undefined ? { course: validatedData.course } : {}),
+        ...('type' in validatedData && validatedData.type !== undefined ? { type: mapEventType(validatedData.type) } : {}),
+        ...('description' in validatedData ? { description: validatedData.description ?? null } : {}),
+        ...('photoUrl' in validatedData ? { photoUrl: validatedData.photoUrl ?? null } : {}),
+        ...('linkAttachments' in validatedData ? { linkAttachments: validatedData.linkAttachments ?? Prisma.JsonNull } : {}),
+        ...('start' in validatedData && validatedData.start !== undefined ? { start: new Date(validatedData.start) } : {}),
+        ...('end' in validatedData ? { end: validatedData.end ? new Date(validatedData.end) : null } : {})
+      }
+    });
+
+    return c.json(transformEvent(event));
   } catch (error) {
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: 'Invalid event data', details: error.issues });
-      return;
+      return c.json({ error: 'Invalid event data', details: error.issues }, 400);
     }
-    res.status(500).json({ error: 'Failed to update event' });
+    if (isPrismaError(error) && error.code === 'P2025') {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    return c.json({ error: 'Failed to update event' }, 500);
   }
 });
 
-router.delete('/:id', checkAuth, checkRole('assistant'), async (req: Request, res: Response): Promise<void> => {
+app.delete('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
   try {
-    const event = await Event.findByIdAndDelete(req.params.id);
-    
-    if (!event) {
-      res.status(404).json({ error: 'Event not found' });
-      return;
-    }
-    
-    res.status(204).send();
+    const id = c.req.param('id');
+    await prisma.event.delete({ where: { id } });
+    return c.body(null, 204);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to delete event' });
+    if (isPrismaError(error) && error.code === 'P2025') {
+      return c.json({ error: 'Event not found' }, 404);
+    }
+    return c.json({ error: 'Failed to delete event' }, 500);
   }
 });
 
-export default router;
+export default app;
