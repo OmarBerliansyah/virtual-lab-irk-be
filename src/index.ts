@@ -23,12 +23,21 @@ app.use('*', prettyJSON());
 
 // CORS
 app.use('*', cors({
-  origin: [
-    'http://localhost:8080',
-    'http://localhost:5173',
-    'https://virtual-lab-irk-fe.vercel.app',
-    ...(process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : [])
+  origin: (origin) => {
+    const allowedOrigins = [
+      'http://localhost:8080',
+      'http://localhost:8081',
+      'http://localhost:5173',
+      'https://virtual-lab-irk.vercel.app',
+      ...(process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : [])
   ],
+
+    if (origin && allowedOrigins.includes(origin)) return origin;
+      
+    if (!origin) return origin;
+
+    return null;
+  },
   credentials: true,
 }));
 
