@@ -30,7 +30,7 @@ app.use('*', cors({
       'http://localhost:5173',
       'https://virtual-lab-irk.vercel.app',
       ...(process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : [])
-  ],
+  ];
 
     if (origin && allowedOrigins.includes(origin)) return origin;
       
