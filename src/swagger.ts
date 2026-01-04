@@ -64,7 +64,7 @@ const swaggerDefinition = {
           angkatan: { type: 'string', example: "IF'22" },
           role: {
             type: 'string',
-            enum: ['ASSISTANT', 'Head Assistant', 'Research Assistant', 'Teaching Assistant', 'Lab Assistant'],
+            enum: ['ASSISTANT', 'HEAD_ASSISTANT', 'RESEARCH_ASSISTANT', 'TEACHING_ASSISTANT', 'LAB_ASSISTANT'],
           },
           image: { type: 'string', nullable: true },
           isActive: { type: 'boolean' },

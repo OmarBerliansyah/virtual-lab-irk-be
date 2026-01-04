@@ -14,6 +14,7 @@ const taskSchema = z.object({
     message: "Invalid date format"
   }).optional(),
   assignee: z.string().optional(),
+  assistantId: z.string().min(1, "Assistant is required"),
   tags: z.array(z.string()).optional()
 });
 
@@ -62,7 +63,8 @@ const transformTask = (task: any) => ({
   priority: reverseMapPriority(task.priority),
   status: reverseMapStatus(task.status),
   dueDate: task.dueDate,
-  assignee: task.assignee,
+  assignee: task.assistant?.name ?? task.assignee,
+  assistantId: task.assistantId,
   tags: task.tags,
   createdAt: task.createdAt,
   updatedAt: task.updatedAt
@@ -71,7 +73,15 @@ const transformTask = (task: any) => ({
 app.get('/', checkAuth, checkRole('ASSISTANT'), async (c) => {
   try {
     const tasks = await prisma.task.findMany({
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
+      include: {
+        assistant: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
+      }
     });
     return c.json(tasks.map(transformTask));
   } catch (error) {
@@ -84,15 +94,29 @@ app.post('/', checkAuth, checkRole('ASSISTANT'), async (c) => {
     const body = await c.req.json();
     console.log('Creating task with data:', body);
     const validatedData = taskSchema.parse(body);
+
+    const assistant = await prisma.assistant.findUnique({ where: { id: validatedData.assistantId } });
+    if (!assistant) {
+      return c.json({ error: 'Assistant not found' }, 400);
+    }
+
     const task = await prisma.task.create({
       data: {
         title: validatedData.title,
         description: validatedData.description ?? '',
         priority: mapPriority(validatedData.priority),
         status: mapStatus(validatedData.status),
-        assignee: validatedData.assignee ?? null,
+        assignee: assistant.name,
         tags: validatedData.tags ?? [],
-        dueDate: validatedData.dueDate ? new Date(validatedData.dueDate) : null
+        dueDate: validatedData.dueDate ? new Date(validatedData.dueDate) : null,
+        assistant: {
+          connect: { id: validatedData.assistantId }
+        }
+      },
+      include: {
+        assistant: {
+          select: { id: true, name: true }
+        }
       }
     });
 
@@ -116,16 +140,38 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
     console.log('Updating task with ID:', id, 'Data:', body);
     const validatedData = taskSchema.partial().parse(body);
 
+    let updateData: any = {
+      ...('title' in validatedData && validatedData.title !== undefined ? { title: validatedData.title } : {}),
+      ...('description' in validatedData ? { description: validatedData.description ?? '' } : {}),
+      ...('priority' in validatedData ? { priority: mapPriority(validatedData.priority) } : {}),
+      ...('status' in validatedData ? { status: mapStatus(validatedData.status) } : {}),
+      ...('assignee' in validatedData ? { assignee: validatedData.assignee ?? null } : {}),
+      ...('tags' in validatedData ? { tags: validatedData.tags ?? [] } : {}),
+      ...('dueDate' in validatedData ? { dueDate: validatedData.dueDate ? new Date(validatedData.dueDate) : null } : {})
+    };
+
+    if (validatedData.assistantId) {
+      const assistant = await prisma.assistant.findUnique({ where: { id: validatedData.assistantId } });
+      if (!assistant) {
+        return c.json({ error: 'Assistant not found' }, 400);
+      }
+
+      updateData = {
+        ...updateData,
+        assignee: assistant.name,
+        assistant: {
+          connect: { id: validatedData.assistantId }
+        }
+      };
+    }
+
     const task = await prisma.task.update({
       where: { id },
-      data: {
-        ...('title' in validatedData && validatedData.title !== undefined ? { title: validatedData.title } : {}),
-        ...('description' in validatedData ? { description: validatedData.description ?? '' } : {}),
-        ...('priority' in validatedData ? { priority: mapPriority(validatedData.priority) } : {}),
-        ...('status' in validatedData ? { status: mapStatus(validatedData.status) } : {}),
-        ...('assignee' in validatedData ? { assignee: validatedData.assignee ?? null } : {}),
-        ...('tags' in validatedData ? { tags: validatedData.tags ?? [] } : {}),
-        ...('dueDate' in validatedData ? { dueDate: validatedData.dueDate ? new Date(validatedData.dueDate) : null } : {})
+      data: updateData,
+      include: {
+        assistant: {
+          select: { id: true, name: true }
+        }
       }
     });
 

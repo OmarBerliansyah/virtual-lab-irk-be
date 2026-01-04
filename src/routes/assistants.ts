@@ -8,8 +8,8 @@ const app = new Hono<{ Variables: AuthVariables }>();
 const createAssistantSchema = z.object({
   name: z.string().min(1).trim(),
   email: z.string().email().regex(/^\d{8}@std\.stei\.itb\.ac\.id$/),
-  nim: z.string().regex(/^\d{8}$/),
-  role: z.enum(['ASSISTANT', 'Head Assistant', 'Research Assistant', 'Teaching Assistant', 'Lab Assistant']).optional(),
+  nim: z.string().regex(/^(135|182)\d{5}$/),
+  role: z.enum(['ASSISTANT', 'HEAD_ASSISTANT', 'RESEARCH_ASSISTANT', 'TEACHING_ASSISTANT', 'LAB_ASSISTANT']).optional(),
   image: z
     .string()
     .refine((val) => val.startsWith('http') || val.startsWith('data:image/'))
@@ -19,15 +19,27 @@ const createAssistantSchema = z.object({
 
 const updateAssistantSchema = z.object({
   name: z.string().min(1).trim().optional(),
-  role: z.enum(['ASSISTANT', 'Head Assistant', 'Research Assistant', 'Teaching Assistant', 'Lab Assistant']).optional(),
+  email: z.string().email().regex(/^\d{8}@std\.stei\.itb\.ac\.id$/).optional(),
+  nim: z.string().regex(/^(135|182)\d{5}$/).optional(),
+  role: z.enum(['ASSISTANT', 'HEAD_ASSISTANT', 'RESEARCH_ASSISTANT', 'TEACHING_ASSISTANT', 'LAB_ASSISTANT']).optional(),
   image: z
-    .string()
-    .refine((val) => val.startsWith('http') || val.startsWith('data:image/'))
+    .union([
+      z.string().refine((val) => val.startsWith('http') || val.startsWith('data:image/')),
+      z.literal(null)
+    ])
     .optional(),
   isActive: z.boolean().optional()
 });
 
 const mapAssistantRole = (role?: string | null): AssistantRole => {
+  if (!role) return 'ASSISTANT';
+
+  // If the value is already a valid enum, keep it
+  if (Object.values(AssistantRole).includes(role as AssistantRole)) {
+    return role as AssistantRole;
+  }
+
+  // Support legacy human-readable labels
   const mapping: Record<string, AssistantRole> = {
     'Assistant': 'ASSISTANT',
     'Head Assistant': 'HEAD_ASSISTANT',
@@ -35,7 +47,8 @@ const mapAssistantRole = (role?: string | null): AssistantRole => {
     'Teaching Assistant': 'TEACHING_ASSISTANT',
     'Lab Assistant': 'LAB_ASSISTANT'
   };
-  return role ? mapping[role] ?? 'ASSISTANT' : 'ASSISTANT';
+
+  return mapping[role] ?? 'ASSISTANT';
 };
 
 const transformAssistant = (assistant: any) => ({
@@ -50,6 +63,9 @@ const transformAssistant = (assistant: any) => ({
   createdAt: assistant.createdAt,
   updatedAt: assistant.updatedAt
 });
+
+const formatZodIssues = (issues: z.ZodIssue[]) =>
+  issues.map((issue) => `${issue.path.join('.') || 'field'}: ${issue.message}`).join('; ');
 
 app.get('/', async (c) => {
   try {
@@ -135,7 +151,12 @@ app.post('/', checkAuth, checkRole('ADMIN'), async (c) => {
     return c.json({ success: true, data: transformAssistant(assistant), message: 'Assistant created successfully' }, 201);
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation failed', details: error.issues }, 400);
+      return c.json({
+        success: false,
+        error: 'Validation failed',
+        details: error.issues,
+        message: formatZodIssues(error.issues)
+      }, 400);
     }
     console.error('Error creating assistant:', error);
     return c.json({ success: false, error: 'Failed to create assistant' }, 500);
@@ -164,18 +185,31 @@ app.put('/:id', checkAuth, async (c) => {
       delete validatedData.isActive;
     }
 
-    const updateData: { name?: string; role?: AssistantRole; image?: string | null; isActive?: boolean } = {};
+    const updateData: { name?: string; role?: AssistantRole; image?: string | null; isActive?: boolean; email?: string; nim?: string; angkatan?: string } = {};
     if ('name' in validatedData && validatedData.name !== undefined) updateData.name = validatedData.name;
     if ('role' in validatedData && validatedData.role !== undefined) updateData.role = mapAssistantRole(validatedData.role);
     if ('image' in validatedData) updateData.image = validatedData.image ?? null;
     if ('isActive' in validatedData && validatedData.isActive !== undefined) updateData.isActive = validatedData.isActive;
+    if (isAdmin) {
+      if ('email' in validatedData && validatedData.email !== undefined) updateData.email = validatedData.email;
+      if ('nim' in validatedData && validatedData.nim !== undefined) {
+        updateData.nim = validatedData.nim;
+        const angkatanFromNim = validatedData.nim.substring(3, 5);
+        updateData.angkatan = `IF'${angkatanFromNim}`;
+      }
+    }
 
     const updatedAssistant = await prisma.assistant.update({ where: { id }, data: updateData });
 
     return c.json({ success: true, data: transformAssistant(updatedAssistant), message: 'Assistant updated successfully' });
   } catch (error) {
     if (error instanceof z.ZodError) {
-      return c.json({ success: false, error: 'Validation failed', details: error.issues }, 400);
+      return c.json({
+        success: false,
+        error: 'Validation failed',
+        details: error.issues,
+        message: formatZodIssues(error.issues)
+      }, 400);
     }
     console.error('Error updating assistant:', error);
     return c.json({ success: false, error: 'Failed to update assistant' }, 500);
