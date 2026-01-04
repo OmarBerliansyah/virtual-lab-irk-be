@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { checkAuth, checkRole, type AuthVariables } from '../middleware/auth';
 import prisma, { isPrismaError, EventType, Prisma } from '../lib/prisma';
+import { eventMutex } from '../lib/queue';
 import { z } from 'zod';
 
 const app = new Hono<{ Variables: AuthVariables }>();
@@ -95,9 +96,8 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
     const body = await c.req.json();
     const id = c.req.param('id');
     
-    // OCC: Validate version is provided
-    const currentVersion = body.version;
-    if (currentVersion === undefined || currentVersion === null) {
+    const userVersion = body.version;
+    if (userVersion === undefined || userVersion === null) {
       return c.json({ 
         error: 'Version is required for concurrency control',
         code: 'VERSION_REQUIRED'
@@ -106,24 +106,18 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
     
     const validatedData = eventSchema.partial().parse(body);
     
-    // OCC: Use transaction to ensure atomic check-and-update
-    const event = await prisma.$transaction(async (tx) => {
-      // First, check if the record exists with matching version
-      const existing = await tx.event.findFirst({
-        where: { id, version: currentVersion }
-      });
-      
-      if (!existing) {
-        // Check if record exists at all
-        const eventExists = await tx.event.findUnique({ where: { id } });
-        if (!eventExists) {
-          throw new Error('EVENT_NOT_FOUND');
-        }
-        throw new Error('VERSION_CONFLICT');
+    const event = await eventMutex.run(id, async () => {
+      const currentEvent = await prisma.event.findUnique({ where: { id } });
+
+      if (!currentEvent) {
+        throw new Error('EVENT_NOT_FOUND');
       }
-      
-      // Update with version increment
-      return tx.event.update({
+
+      if (currentEvent.version > userVersion) {
+        console.log(`[EventQueue] Auto-merge for Event ${id}: user v${userVersion} -> db v${currentEvent.version}`);
+      }
+
+      return prisma.event.update({
         where: { id },
         data: {
           ...('title' in validatedData && validatedData.title !== undefined ? { title: validatedData.title } : {}),
@@ -147,12 +141,6 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
     if (error instanceof Error) {
       if (error.message === 'EVENT_NOT_FOUND') {
         return c.json({ error: 'Event not found' }, 404);
-      }
-      if (error.message === 'VERSION_CONFLICT') {
-        return c.json({ 
-          error: 'Conflict: Data has been modified by another user. Please refresh and try again.',
-          code: 'CONFLICT'
-        }, 409);
       }
     }
     if (isPrismaError(error) && error.code === 'P2025') {

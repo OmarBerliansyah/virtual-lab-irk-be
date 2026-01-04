@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { checkAuth, checkRole, type AuthVariables } from '../middleware/auth';
 import prisma, { isPrismaError, TaskPriority, TaskStatus } from '../lib/prisma';
+import { taskMutex } from '../lib/queue';
 import { z } from 'zod';
 
 const app = new Hono<{ Variables: AuthVariables }>();
@@ -140,9 +141,8 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
     const body = await c.req.json();
     console.log('Updating task with ID:', id, 'Data:', body);
     
-    // OCC: Validate version is provided
-    const currentVersion = body.version;
-    if (currentVersion === undefined || currentVersion === null) {
+    const userVersion = body.version;
+    if (userVersion === undefined || userVersion === null) {
       return c.json({ 
         error: 'Version is required for concurrency control',
         code: 'VERSION_REQUIRED'
@@ -176,33 +176,28 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
       };
     }
 
-    // OCC: Use transaction to ensure atomic check-and-update
-    const task = await prisma.$transaction(async (tx) => {
-      // First, check if the record exists with matching version
-      const existing = await tx.task.findFirst({
-        where: { id, version: currentVersion }
+    const task = await taskMutex.run(id, async () => {
+      const currentTask = await prisma.task.findUnique({
+        where: { id },
+        include: { assistant: { select: { id: true, name: true } } }
       });
-      
-      if (!existing) {
-        // Check if record exists at all
-        const taskExists = await tx.task.findUnique({ where: { id } });
-        if (!taskExists) {
-          throw new Error('TASK_NOT_FOUND');
-        }
-        throw new Error('VERSION_CONFLICT');
+
+      if (!currentTask) {
+        throw new Error('TASK_NOT_FOUND');
       }
-      
-      // Update with version increment
-      return tx.task.update({
+
+      if (currentTask.version > userVersion) {
+        console.log(`[TaskQueue] Auto-merge for Task ${id}: user v${userVersion} -> db v${currentTask.version}`);
+      }
+
+      return prisma.task.update({
         where: { id },
         data: {
           ...updateData,
           version: { increment: 1 }
         },
         include: {
-          assistant: {
-            select: { id: true, name: true }
-          }
+          assistant: { select: { id: true, name: true } }
         }
       });
     });
@@ -219,12 +214,6 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
     if (error instanceof Error) {
       if (error.message === 'TASK_NOT_FOUND') {
         return c.json({ error: 'Task not found' }, 404);
-      }
-      if (error.message === 'VERSION_CONFLICT') {
-        return c.json({ 
-          error: 'Conflict: Data has been modified by another user. Please refresh and try again.',
-          code: 'CONFLICT'
-        }, 409);
       }
     }
     if (isPrismaError(error) && error.code === 'P2025') {
