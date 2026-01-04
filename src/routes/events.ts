@@ -45,6 +45,7 @@ const transformEvent = (event: any) => ({
   description: event.description,
   photoUrl: event.photoUrl,
   linkAttachments: event.linkAttachments,
+  version: event.version,
   createdAt: event.createdAt,
   updatedAt: event.updatedAt
 });
@@ -92,26 +93,67 @@ app.post('/', checkAuth, checkRole('ASSISTANT'), async (c) => {
 app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
   try {
     const body = await c.req.json();
-    const validatedData = eventSchema.partial().parse(body);
     const id = c.req.param('id');
-    const event = await prisma.event.update({
-      where: { id },
-      data: {
-        ...('title' in validatedData && validatedData.title !== undefined ? { title: validatedData.title } : {}),
-        ...('course' in validatedData && validatedData.course !== undefined ? { course: validatedData.course } : {}),
-        ...('type' in validatedData && validatedData.type !== undefined ? { type: mapEventType(validatedData.type) } : {}),
-        ...('description' in validatedData ? { description: validatedData.description ?? null } : {}),
-        ...('photoUrl' in validatedData ? { photoUrl: validatedData.photoUrl ?? null } : {}),
-        ...('linkAttachments' in validatedData ? { linkAttachments: validatedData.linkAttachments ?? Prisma.JsonNull } : {}),
-        ...('start' in validatedData && validatedData.start !== undefined ? { start: new Date(validatedData.start) } : {}),
-        ...('end' in validatedData ? { end: validatedData.end ? new Date(validatedData.end) : null } : {})
+    
+    // OCC: Validate version is provided
+    const currentVersion = body.version;
+    if (currentVersion === undefined || currentVersion === null) {
+      return c.json({ 
+        error: 'Version is required for concurrency control',
+        code: 'VERSION_REQUIRED'
+      }, 400);
+    }
+    
+    const validatedData = eventSchema.partial().parse(body);
+    
+    // OCC: Use transaction to ensure atomic check-and-update
+    const event = await prisma.$transaction(async (tx) => {
+      // First, check if the record exists with matching version
+      const existing = await tx.event.findFirst({
+        where: { id, version: currentVersion }
+      });
+      
+      if (!existing) {
+        // Check if record exists at all
+        const eventExists = await tx.event.findUnique({ where: { id } });
+        if (!eventExists) {
+          throw new Error('EVENT_NOT_FOUND');
+        }
+        throw new Error('VERSION_CONFLICT');
       }
+      
+      // Update with version increment
+      return tx.event.update({
+        where: { id },
+        data: {
+          ...('title' in validatedData && validatedData.title !== undefined ? { title: validatedData.title } : {}),
+          ...('course' in validatedData && validatedData.course !== undefined ? { course: validatedData.course } : {}),
+          ...('type' in validatedData && validatedData.type !== undefined ? { type: mapEventType(validatedData.type) } : {}),
+          ...('description' in validatedData ? { description: validatedData.description ?? null } : {}),
+          ...('photoUrl' in validatedData ? { photoUrl: validatedData.photoUrl ?? null } : {}),
+          ...('linkAttachments' in validatedData ? { linkAttachments: validatedData.linkAttachments ?? Prisma.JsonNull } : {}),
+          ...('start' in validatedData && validatedData.start !== undefined ? { start: new Date(validatedData.start) } : {}),
+          ...('end' in validatedData ? { end: validatedData.end ? new Date(validatedData.end) : null } : {}),
+          version: { increment: 1 }
+        }
+      });
     });
 
     return c.json(transformEvent(event));
   } catch (error) {
     if (error instanceof z.ZodError) {
       return c.json({ error: 'Invalid event data', details: error.issues }, 400);
+    }
+    if (error instanceof Error) {
+      if (error.message === 'EVENT_NOT_FOUND') {
+        return c.json({ error: 'Event not found' }, 404);
+      }
+      if (error.message === 'VERSION_CONFLICT') {
+        return c.json({ 
+          error: 'Conflict: Data has been modified by another user. Please refresh and try again.',
+          code: 'CONFLICT'
+        }, 409);
+      }
     }
     if (isPrismaError(error) && error.code === 'P2025') {
       return c.json({ error: 'Event not found' }, 404);

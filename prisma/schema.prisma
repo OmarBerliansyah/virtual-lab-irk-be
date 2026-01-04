@@ -5,6 +5,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum Role {
@@ -45,6 +46,7 @@ model User {
   clerkId   String   @unique
   email     String
   role      Role     @default(USER)
+  version   Int      @default(0) // Optimistic Concurrency Control
   createdAt DateTime? @default(now())
   updatedAt DateTime? @updatedAt
 }
@@ -59,6 +61,7 @@ model Assistant {
   image     String?
   isActive  Boolean        @default(true)
   tasks     Task[]
+  version   Int            @default(0) // Optimistic Concurrency Control
   createdAt DateTime?      @default(now())
   updatedAt DateTime?      @updatedAt
 }
@@ -73,6 +76,7 @@ model Event {
   description     String?
   photoUrl        String?
   linkAttachments Json?
+  version         Int         @default(0) // Optimistic Concurrency Control
   createdAt       DateTime?   @default(now())
   updatedAt       DateTime?   @updatedAt
 }
@@ -88,6 +92,7 @@ model Task {
   dueDate     DateTime?
   assignee    String?
   tags        String[]
+  version     Int          @default(0) // Optimistic Concurrency Control
   createdAt   DateTime?    @default(now())
   updatedAt   DateTime?    @updatedAt
 }

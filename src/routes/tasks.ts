@@ -66,6 +66,7 @@ const transformTask = (task: any) => ({
   assignee: task.assistant?.name ?? task.assignee,
   assistantId: task.assistantId,
   tags: task.tags,
+  version: task.version,
   createdAt: task.createdAt,
   updatedAt: task.updatedAt
 });
@@ -138,6 +139,16 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
     const id = c.req.param('id');
     const body = await c.req.json();
     console.log('Updating task with ID:', id, 'Data:', body);
+    
+    // OCC: Validate version is provided
+    const currentVersion = body.version;
+    if (currentVersion === undefined || currentVersion === null) {
+      return c.json({ 
+        error: 'Version is required for concurrency control',
+        code: 'VERSION_REQUIRED'
+      }, 400);
+    }
+    
     const validatedData = taskSchema.partial().parse(body);
 
     let updateData: any = {
@@ -165,14 +176,35 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
       };
     }
 
-    const task = await prisma.task.update({
-      where: { id },
-      data: updateData,
-      include: {
-        assistant: {
-          select: { id: true, name: true }
+    // OCC: Use transaction to ensure atomic check-and-update
+    const task = await prisma.$transaction(async (tx) => {
+      // First, check if the record exists with matching version
+      const existing = await tx.task.findFirst({
+        where: { id, version: currentVersion }
+      });
+      
+      if (!existing) {
+        // Check if record exists at all
+        const taskExists = await tx.task.findUnique({ where: { id } });
+        if (!taskExists) {
+          throw new Error('TASK_NOT_FOUND');
         }
+        throw new Error('VERSION_CONFLICT');
       }
+      
+      // Update with version increment
+      return tx.task.update({
+        where: { id },
+        data: {
+          ...updateData,
+          version: { increment: 1 }
+        },
+        include: {
+          assistant: {
+            select: { id: true, name: true }
+          }
+        }
+      });
     });
 
     return c.json(transformTask(task));
@@ -183,6 +215,17 @@ app.put('/:id', checkAuth, checkRole('ASSISTANT'), async (c) => {
         error: 'Invalid task data',
         details: error.issues
       }, 400);
+    }
+    if (error instanceof Error) {
+      if (error.message === 'TASK_NOT_FOUND') {
+        return c.json({ error: 'Task not found' }, 404);
+      }
+      if (error.message === 'VERSION_CONFLICT') {
+        return c.json({ 
+          error: 'Conflict: Data has been modified by another user. Please refresh and try again.',
+          code: 'CONFLICT'
+        }, 409);
+      }
     }
     if (isPrismaError(error) && error.code === 'P2025') {
       return c.json({ error: 'Task not found' }, 404);

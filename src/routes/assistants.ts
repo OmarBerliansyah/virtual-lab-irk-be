@@ -60,6 +60,7 @@ const transformAssistant = (assistant: any) => ({
   role: assistant.role,
   image: assistant.image,
   isActive: assistant.isActive,
+  version: assistant.version,
   createdAt: assistant.createdAt,
   updatedAt: assistant.updatedAt
 });
@@ -181,7 +182,19 @@ app.put('/:id', checkAuth, async (c) => {
       return c.json({ success: false, error: 'You can only update your own profile' }, 403);
     }
 
-    const validatedData = updateAssistantSchema.parse(await c.req.json());
+    const body = await c.req.json();
+    
+    // OCC: Validate version is provided
+    const currentVersion = body.version;
+    if (currentVersion === undefined || currentVersion === null) {
+      return c.json({ 
+        success: false, 
+        error: 'Version is required for concurrency control',
+        code: 'VERSION_REQUIRED'
+      }, 400);
+    }
+    
+    const validatedData = updateAssistantSchema.parse(body);
     if (validatedData.isActive !== undefined && !isAdmin) {
       delete validatedData.isActive;
     }
@@ -200,7 +213,26 @@ app.put('/:id', checkAuth, async (c) => {
       }
     }
 
-    const updatedAssistant = await prisma.assistant.update({ where: { id }, data: updateData });
+    // OCC: Use transaction to ensure atomic check-and-update
+    const updatedAssistant = await prisma.$transaction(async (tx) => {
+      // First, check if the record exists with matching version
+      const existing = await tx.assistant.findFirst({
+        where: { id, version: currentVersion }
+      });
+      
+      if (!existing) {
+        throw new Error('VERSION_CONFLICT');
+      }
+      
+      // Update with version increment
+      return tx.assistant.update({ 
+        where: { id }, 
+        data: {
+          ...updateData,
+          version: { increment: 1 }
+        }
+      });
+    });
 
     return c.json({ success: true, data: transformAssistant(updatedAssistant), message: 'Assistant updated successfully' });
   } catch (error) {
@@ -211,6 +243,14 @@ app.put('/:id', checkAuth, async (c) => {
         details: error.issues,
         message: formatZodIssues(error.issues)
       }, 400);
+    }
+    // OCC: Handle concurrency conflict
+    if (error instanceof Error && error.message === 'VERSION_CONFLICT') {
+      return c.json({ 
+        success: false, 
+        error: 'Conflict: Data has been modified by another user. Please refresh and try again.',
+        code: 'CONFLICT'
+      }, 409);
     }
     console.error('Error updating assistant:', error);
     return c.json({ success: false, error: 'Failed to update assistant' }, 500);
@@ -240,14 +280,42 @@ app.patch('/:id/toggle-active', checkAuth, checkRole('ADMIN'), async (c) => {
     const id = c.req.param('id');
     if (!id) return c.json({ success: false, error: 'Assistant ID is required' }, 400);
 
+    // OCC: Get version from request body
+    const body = await c.req.json().catch(() => ({}));
+    const currentVersion = body.version;
+    
+    if (currentVersion === undefined || currentVersion === null) {
+      return c.json({ 
+        success: false, 
+        error: 'Version is required for concurrency control',
+        code: 'VERSION_REQUIRED'
+      }, 400);
+    }
+
     const assistant = await prisma.assistant.findUnique({ where: { id } });
     if (!assistant) {
       return c.json({ success: false, error: 'Assistant not found' }, 404);
     }
 
-    const updatedAssistant = await prisma.assistant.update({
-      where: { id },
-      data: { isActive: !assistant.isActive }
+    // OCC: Use transaction to ensure atomic check-and-update
+    const updatedAssistant = await prisma.$transaction(async (tx) => {
+      // First, check if the record exists with matching version
+      const existing = await tx.assistant.findFirst({
+        where: { id, version: currentVersion }
+      });
+      
+      if (!existing) {
+        throw new Error('VERSION_CONFLICT');
+      }
+      
+      // Update with version increment
+      return tx.assistant.update({
+        where: { id },
+        data: { 
+          isActive: !assistant.isActive,
+          version: { increment: 1 }
+        }
+      });
     });
 
     return c.json({
@@ -256,6 +324,14 @@ app.patch('/:id/toggle-active', checkAuth, checkRole('ADMIN'), async (c) => {
       message: `Assistant ${updatedAssistant.isActive ? 'activated' : 'deactivated'} successfully`
     });
   } catch (error) {
+    // OCC: Handle concurrency conflict
+    if (error instanceof Error && error.message === 'VERSION_CONFLICT') {
+      return c.json({ 
+        success: false, 
+        error: 'Conflict: Data has been modified by another user. Please refresh and try again.',
+        code: 'CONFLICT'
+      }, 409);
+    }
     console.error('Error toggling assistant status:', error);
     return c.json({ success: false, error: 'Failed to toggle assistant status' }, 500);
   }
