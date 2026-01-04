@@ -176,7 +176,8 @@ app.put('/:id', checkAuth, async (c) => {
     const auth = c.get('auth');
     const isOwnProfile = assistant.email === auth?.user?.email;
     const isAdmin = auth?.user?.role === 'ADMIN';
-    if (!isOwnProfile && !isAdmin) {
+    const isAssistant = auth?.user?.role === 'ASSISTANT';
+    if (!isOwnProfile && !isAdmin && !isAssistant) {
       return c.json({ success: false, error: 'You can only update your own profile' }, 403);
     }
 
