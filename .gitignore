@@ -2,7 +2,9 @@ dist/*
 node_modules/*
 .env
 nodemon.json
+npm-debug.log
+.DS_Store
 
-# Docker specific
-Dockerfile
-.dockerignore
+prisma/seed-data
+prisma/parse-bson.ts
+prisma/seed.ts

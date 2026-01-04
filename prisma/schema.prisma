@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ASSISTANT
+  ADMIN
+}
+
+enum AssistantRole {
+  ASSISTANT         
+  HEAD_ASSISTANT     
+  RESEARCH_ASSISTANT
+  TEACHING_ASSISTANT
+  LAB_ASSISTANT
+}
+
+enum EventType {
+  DEADLINE
+  RELEASE
+  ASSESSMENT
+  HIGHLIGHT
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskStatus {
+  TO_DO
+  IN_PROGRESS
+  DONE
+}
+
+model User {
+  id        String   @id @default(uuid())
+  clerkId   String   @unique
+  email     String
+  role      Role     @default(USER)
+  version   Int      @default(0) // Optimistic Concurrency Control
+  createdAt DateTime? @default(now())
+  updatedAt DateTime? @updatedAt
+}
+
+model Assistant {
+  id        String         @id @default(uuid())
+  name      String
+  email     String         @unique
+  nim       String         @unique
+  angkatan  String
+  role      AssistantRole  @default(ASSISTANT)
+  image     String?
+  isActive  Boolean        @default(true)
+  tasks     Task[]
+  version   Int            @default(0) // Optimistic Concurrency Control
+  createdAt DateTime?      @default(now())
+  updatedAt DateTime?      @updatedAt
+}
+
+model Event {
+  id              String      @id @default(uuid())
+  title           String
+  start           DateTime
+  end             DateTime?
+  course          String
+  type            EventType
+  description     String?
+  photoUrl        String?
+  linkAttachments Json?
+  version         Int         @default(0) // Optimistic Concurrency Control
+  createdAt       DateTime?   @default(now())
+  updatedAt       DateTime?   @updatedAt
+}
+
+model Task {
+  id          String       @id @default(uuid())
+  assistant   Assistant?   @relation(fields: [assistantId], references: [id])
+  assistantId String?
+  title       String
+  description String       @default("")
+  priority    TaskPriority @default(LOW)
+  status      TaskStatus   @default(TO_DO)
+  dueDate     DateTime?
+  assignee    String?
+  tags        String[]
+  version     Int          @default(0) // Optimistic Concurrency Control
+  createdAt   DateTime?    @default(now())
+  updatedAt   DateTime?    @updatedAt
+}

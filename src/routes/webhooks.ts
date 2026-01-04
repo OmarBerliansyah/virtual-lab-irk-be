@@ -1,28 +1,26 @@
-import { Router, Request, Response } from 'express';
-import { User } from '../models';
+import { Hono } from 'hono';
 import { Webhook } from 'svix';
+import prisma, { Role } from '../lib/prisma';
 
-const router = Router();
+const app = new Hono();
 
-router.post('/clerk', async (req: Request, res: Response): Promise<void> => {
+app.post('/clerk', async (c) => {
   try {
     const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
-    
+
     if (!WEBHOOK_SECRET) {
-      res.status(500).json({ error: 'Missing webhook secret' });
-      return;
+      return c.json({ error: 'Missing webhook secret' }, 500);
     }
 
-    const svix_id = req.headers['svix-id'] as string;
-    const svix_timestamp = req.headers['svix-timestamp'] as string;
-    const svix_signature = req.headers['svix-signature'] as string;
+    const svix_id = c.req.header('svix-id');
+    const svix_timestamp = c.req.header('svix-timestamp');
+    const svix_signature = c.req.header('svix-signature');
 
     if (!svix_id || !svix_timestamp || !svix_signature) {
-      res.status(400).json({ error: 'Missing svix headers' });
-      return;
+      return c.json({ error: 'Missing svix headers' }, 400);
     }
 
-    const body = JSON.stringify(req.body);
+    const body = await c.req.text();
 
     const wh = new Webhook(WEBHOOK_SECRET);
 
@@ -36,8 +34,7 @@ router.post('/clerk', async (req: Request, res: Response): Promise<void> => {
       });
     } catch (err) {
       console.error('Error verifying webhook:', err);
-      res.status(400).json({ error: 'Webhook verification failed' });
-      return;
+      return c.json({ error: 'Webhook verification failed' }, 400);
     }
 
     const { type } = evt;
@@ -46,55 +43,55 @@ router.post('/clerk', async (req: Request, res: Response): Promise<void> => {
 
     if (type === 'user.created') {
       const { id, email_addresses, created_at } = evt.data;
-      
+
       try {
-        const existingUser = await User.findOne({ clerkId: id });
+        const existingUser = await prisma.user.findUnique({ where: { clerkId: id } });
         if (existingUser) {
           console.log('User already exists:', existingUser.email);
-          res.status(200).json({ received: true, userId: existingUser._id, status: 'already_exists' });
-          return;
+          return c.json({ received: true, userId: existingUser.id, status: 'already_exists' });
         }
 
         const email = email_addresses[0]?.email_address || '';
-        
-        let role = 'user';
+
+        let role: Role = 'USER';
         if (email === '18223055@std.stei.itb.ac.id' || email === '18223005@std.stei.itb.ac.id') {
-          role = 'admin';
+          role = 'ADMIN';
         }
 
-        const user = await User.create({
-          clerkId: id,
-          email,
-          role
+        const user = await prisma.user.create({
+          data: {
+            clerkId: id,
+            email,
+            role
+          }
         });
 
-        console.log('User created via webhook:', user.email, 'with role:', user.role, 'ID:', user._id);
-        res.status(200).json({ received: true, userId: user._id, status: 'created', role: user.role });
+        console.log('User created via webhook:', user.email, 'with role:', user.role, 'ID:', user.id);
+        return c.json({ received: true, userId: user.id, status: 'created', role: user.role });
       } catch (error) {
         console.error('Error creating user:', error);
-        res.status(500).json({ error: 'Failed to create user' });
+        return c.json({ error: 'Failed to create user' }, 500);
       }
     } else if (type === 'session.created') {
       const { user_id } = evt.data;
       console.log('User signed in:', user_id);
-      
-      // Check if user exists in our database
-      const existingUser = await User.findOne({ clerkId: user_id });
+
+      const existingUser = await prisma.user.findUnique({ where: { clerkId: user_id } });
       if (!existingUser) {
         console.log('User signed in but not found in database:', user_id);
       } else {
         console.log('User sign-in tracked:', existingUser.email);
       }
-      
-      res.status(200).json({ received: true, status: 'session_tracked' });
+
+      return c.json({ received: true, status: 'session_tracked' });
     } else {
       console.log('Unhandled webhook type:', type);
-      res.status(200).json({ received: true, status: 'unhandled' });
+      return c.json({ received: true, status: 'unhandled' });
     }
   } catch (error) {
     console.error('Webhook error:', error);
-    res.status(500).json({ error: 'Webhook processing failed' });
+    return c.json({ error: 'Webhook processing failed' }, 500);
   }
 });
 
-export default router;
+export default app;
