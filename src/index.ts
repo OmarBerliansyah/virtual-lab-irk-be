@@ -29,6 +29,7 @@ app.use('*', cors({
       'http://localhost:8081',
       'http://localhost:5173',
       'https://virtual-lab-irk.vercel.app',
+      'https://virtual-lab-irk-api-iead3.ondigitalocean.app/docs',
       ...(process.env.CORS_ORIGIN ? [process.env.CORS_ORIGIN] : [])
   ];
 
