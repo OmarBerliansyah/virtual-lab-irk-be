@@ -10,8 +10,6 @@ RUN bun install --frozen-lockfile
 # Copy sisa source code
 COPY . .
 
-ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
-
 # Generate Prisma Client (Wajib ada biar database konek)
 RUN bunx prisma generate
 
